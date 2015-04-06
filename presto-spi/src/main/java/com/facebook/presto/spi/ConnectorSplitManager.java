@@ -13,7 +13,10 @@
  */
 package com.facebook.presto.spi;
 
+import io.airlift.slice.Slice;
+
 import java.util.List;
+import java.util.Optional;
 
 public interface ConnectorSplitManager
 {
@@ -28,6 +31,16 @@ public interface ConnectorSplitManager
     default ConnectorPartitionResult getPartitions(ConnectorTableHandle table, TupleDomain<ColumnHandle> tupleDomain)
     {
         throw new UnsupportedOperationException("not yet implemented");
+    }
+
+    /**
+     * Computes the digest for the partitions of a specific table. Digest indicates the update state of
+     * the partitions or the table. It should generate the same digest for the same set of partitions as long as
+     * those partitions would not produce a different dataset for table scan.
+     */
+    default Optional<Slice> computeDigest(ConnectorTableHandle table, List<ConnectorPartition> connectorPartitions)
+    {
+        return Optional.empty();
     }
 
     /**

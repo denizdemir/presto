@@ -24,6 +24,7 @@ public class FeaturesConfig
     private boolean optimizeMetadataQueries;
     private boolean optimizeHashGeneration;
     private boolean optimizeSingleDistinct = true;
+    private boolean queryDigestEnabled;
 
     @LegacyConfig("analyzer.experimental-syntax-enabled")
     @Config("experimental-syntax-enabled")
@@ -95,6 +96,18 @@ public class FeaturesConfig
     public FeaturesConfig setOptimizeSingleDistinct(boolean optimizeSingleDistinct)
     {
         this.optimizeSingleDistinct = optimizeSingleDistinct;
+        return this;
+    }
+
+    public boolean isQueryDigestEnabled()
+    {
+        return queryDigestEnabled;
+    }
+
+    @Config("query-digest-enabled")
+    public FeaturesConfig setQueryDigestEnabled(boolean queryDigestEnabled)
+    {
+        this.queryDigestEnabled = queryDigestEnabled;
         return this;
     }
 }

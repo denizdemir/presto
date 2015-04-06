@@ -38,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -261,7 +262,7 @@ public class SqlQueryManager
     }
 
     @Override
-    public QueryInfo createQuery(Session session, String query)
+    public QueryInfo createQuery(Session session, String query, Optional<String> queryDigest)
     {
         checkNotNull(query, "query is null");
         checkArgument(!query.isEmpty(), "query must not be empty string");
@@ -292,7 +293,7 @@ public class SqlQueryManager
             return execution.getQueryInfo();
         }
 
-        QueryExecution queryExecution = queryExecutionFactory.createQueryExecution(queryId, query, session, statement);
+        QueryExecution queryExecution = queryExecutionFactory.createQueryExecution(queryId, query, queryDigest, session, statement);
         queryMonitor.createdEvent(queryExecution.getQueryInfo());
 
         queryExecution.addStateChangeListener(newValue -> {

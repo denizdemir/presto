@@ -19,6 +19,7 @@ import com.facebook.presto.memory.VersionedMemoryPoolId;
 import io.airlift.units.Duration;
 
 import java.net.URI;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 
 import static com.facebook.presto.memory.LocalMemoryManager.GENERAL_POOL;
@@ -30,7 +31,7 @@ public class FailedQueryExecution
 
     public FailedQueryExecution(QueryId queryId, String query, Session session, URI self, Executor executor, Throwable cause)
     {
-        QueryStateMachine queryStateMachine = new QueryStateMachine(queryId, query, session, self, executor);
+        QueryStateMachine queryStateMachine = new QueryStateMachine(queryId, query, Optional.empty(), session, self, executor);
         queryStateMachine.fail(cause);
 
         queryInfo = queryStateMachine.getQueryInfo(null);
