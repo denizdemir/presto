@@ -100,6 +100,9 @@ public class HiveClientConfig
     private DataSize orcMaxBufferSize = new DataSize(8, MEGABYTE);
     private DataSize orcStreamBufferSize = new DataSize(8, MEGABYTE);
 
+    private boolean useTableLastModifiedTimeForDigest = true;
+    private int maxNumberOfPartitionsToRetrieveForDigest = 10;
+
     public int getMaxInitialSplits()
     {
         return maxInitialSplits;
@@ -697,6 +700,30 @@ public class HiveClientConfig
     public HiveClientConfig setUseParquetColumnNames(boolean useParquetColumnNames)
     {
         this.useParquetColumnNames = useParquetColumnNames;
+        return this;
+    }
+
+    public boolean isUseTableLastModifiedTimeForDigest()
+    {
+        return useTableLastModifiedTimeForDigest;
+    }
+
+    @Config("hive.digest.use-table-last-modified-time")
+    public HiveClientConfig setUseTableLastModifiedTimeForDigest(boolean useTableLastModifiedTimeForDigest)
+    {
+        this.useTableLastModifiedTimeForDigest = useTableLastModifiedTimeForDigest;
+        return this;
+    }
+
+    public int getMaxNumberOfPartitionsToRetrieveForDigest()
+    {
+        return maxNumberOfPartitionsToRetrieveForDigest;
+    }
+
+    @Config("hive.digest.max-partitions-to-retrieve")
+    public HiveClientConfig setMaxNumberOfPartitionsToRetrieveForDigest(int maxNumberOfPartitionsToRetrieveForDigest)
+    {
+        this.maxNumberOfPartitionsToRetrieveForDigest = maxNumberOfPartitionsToRetrieveForDigest;
         return this;
     }
 }
