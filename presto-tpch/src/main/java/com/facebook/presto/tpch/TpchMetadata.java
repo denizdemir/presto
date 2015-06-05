@@ -30,9 +30,15 @@ import com.facebook.presto.spi.SortingProperty;
 import com.facebook.presto.spi.TupleDomain;
 import com.facebook.presto.spi.block.SortOrder;
 import com.facebook.presto.spi.type.Type;
+import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hasher;
+import com.google.common.hash.Hashing;
+import io.airlift.slice.Slice;
+import io.airlift.slice.Slices;
 import io.airlift.tpch.LineItemColumn;
 import io.airlift.tpch.OrderColumn;
 import io.airlift.tpch.TpchColumn;
@@ -44,6 +50,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.DateType.DATE;
@@ -137,6 +144,36 @@ public class TpchMetadata
         return getTableLayouts(layout.getTable(), Constraint.<ColumnHandle>alwaysTrue(), Optional.empty())
                 .get(0)
                 .getTableLayout();
+    }
+
+    @Override
+    public Optional<Slice> computeDigest(ConnectorTableHandle tableHandle, ConnectorTableLayoutHandle tableLayoutHandle)
+    {
+        checkNotNull(tableLayoutHandle, "tableLayoutHandle is null");
+        TpchTableLayoutHandle tpchTableLayoutHandle = checkType(tableLayoutHandle, TpchTableLayoutHandle.class, "tableLayoutHandle");
+        ConnectorTableLayout tableLayout = getTableLayout(tableLayoutHandle);
+
+        HashFunction hashFunction = Hashing.sha256();
+        Hasher hasher = hashFunction.newHasher();
+
+        TpchTableHandle tpchTableHandle = tpchTableLayoutHandle.getTable();
+        hasher.putString(tpchTableHandle.getConnectorId(), Charsets.UTF_8);
+        hasher.putString(tpchTableHandle.getTableName(), Charsets.UTF_8);
+
+        Optional<Set<ColumnHandle>> partitioningColumns = tableLayout.getPartitioningColumns();
+
+        if (partitioningColumns.isPresent()) {
+            List<TpchColumnHandle> columns = partitioningColumns.get().stream()
+                    .map(TpchColumnHandle.class::cast)
+                    .sorted((o1, o2) -> o1.getColumnName().compareTo(o2.getColumnName()))
+                    .collect(Collectors.toList());
+            for (TpchColumnHandle tpchColumnHandle : columns) {
+                hasher.putString(tpchColumnHandle.getColumnName(), Charsets.UTF_8);
+                hasher.putString(tpchColumnHandle.getType().getDisplayName(), Charsets.UTF_8);
+            }
+        }
+
+        return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
     }
 
     @Override

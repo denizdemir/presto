@@ -13,30 +13,19 @@
  */
 package com.facebook.presto.tpch;
 
-import com.facebook.presto.spi.ConnectorPartition;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorSplitManager;
 import com.facebook.presto.spi.ConnectorSplitSource;
-import com.facebook.presto.spi.ConnectorTableHandle;
 import com.facebook.presto.spi.ConnectorTableLayoutHandle;
 import com.facebook.presto.spi.FixedSplitSource;
 import com.facebook.presto.spi.Node;
 import com.facebook.presto.spi.NodeManager;
-import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableList;
-import com.google.common.hash.HashFunction;
-import com.google.common.hash.Hasher;
-import com.google.common.hash.Hashing;
-import io.airlift.slice.Slice;
-import io.airlift.slice.Slices;
 
-import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 
 import static com.facebook.presto.tpch.Types.checkType;
 import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
 public class TpchSplitManager
@@ -76,18 +65,61 @@ public class TpchSplitManager
         return new FixedSplitSource(connectorId, splits.build());
     }
 
-    @Override
-    public Optional<Slice> computeDigest(ConnectorTableHandle table, List<ConnectorPartition> partitions)
-    {
-        checkNotNull(partitions, "partitions is null");
-
-        HashFunction hashFunction = Hashing.sha256();
-        Hasher hasher = hashFunction.newHasher();
-
-        for (ConnectorPartition partition : partitions) {
-            hasher.putString(partition.getPartitionId(), Charsets.UTF_8);
-        }
-
-        return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
-    }
+//    @Override
+//    public Optional<Slice> computeDigest(ConnectorTableHandle table, List<ConnectorPartition> partitions)
+//    {
+//        checkNotNull(partitions, "partitions is null");
+//
+//        HashFunction hashFunction = Hashing.sha256();
+//        Hasher hasher = hashFunction.newHasher();
+//
+//        for (ConnectorPartition partition : partitions) {
+//            hasher.putString(partition.getPartitionId(), Charsets.UTF_8);
+//        }
+//
+//        return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
+//    }
+//
+//    @Override
+//    public ConnectorPartitionResult getPartitions(ConnectorTableHandle table, TupleDomain<ColumnHandle> tupleDomain)
+//    {
+//        ImmutableList<ConnectorPartition> partitions = ImmutableList.<ConnectorPartition>of(new TpchPartition((TpchTableHandle) table));
+//        return new ConnectorPartitionResult(partitions, tupleDomain);
+//    }
+//
+//    public static class TpchPartition
+//            implements ConnectorPartition
+//    {
+//        private final TpchTableHandle table;
+//
+//        public TpchPartition(TpchTableHandle table)
+//        {
+//            this.table = checkNotNull(table, "table is null");
+//        }
+//
+//        public TpchTableHandle getTable()
+//        {
+//            return table;
+//        }
+//
+//        @Override
+//        public String getPartitionId()
+//        {
+//            return table.getTableName();
+//        }
+//
+//        @Override
+//        public TupleDomain<ColumnHandle> getTupleDomain()
+//        {
+//            return TupleDomain.all();
+//        }
+//
+//        @Override
+//        public String toString()
+//        {
+//            return toStringHelper(this)
+//                    .add("table", table)
+//                    .toString();
+//        }
+//    }
 }

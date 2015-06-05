@@ -35,6 +35,7 @@ import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorSplitManager;
 import com.facebook.presto.spi.ConnectorSplitSource;
 import com.facebook.presto.spi.ConnectorTableHandle;
+import com.facebook.presto.spi.ConnectorTableLayoutHandle;
 import com.facebook.presto.spi.ConnectorTableMetadata;
 import com.facebook.presto.spi.Domain;
 import com.facebook.presto.spi.PrestoException;
@@ -142,6 +143,7 @@ public abstract class AbstractTestHiveClient
 
     protected Set<HiveStorageFormat> createTableFormats = ImmutableSet.copyOf(HiveStorageFormat.values());
 
+    protected String connectorId;
     protected String database;
     protected SchemaTableName tablePartitionFormat;
     protected SchemaTableName tableUnpartitioned;
@@ -203,6 +205,7 @@ public abstract class AbstractTestHiveClient
 
     protected void setupHive(String connectorId, String databaseName, String timeZoneId)
     {
+        this.connectorId = connectorId;
         database = databaseName;
         tablePartitionFormat = new SchemaTableName(database, "presto_test_partition_format");
         tableUnpartitioned = new SchemaTableName(database, "presto_test_unpartitioned");
@@ -304,6 +307,9 @@ public abstract class AbstractTestHiveClient
                 true,
                 true,
                 true,
+                hiveClientConfig.isAssumeCanonicalPartitionKeys(),
+                hiveClientConfig.isUseTableLastModifiedTimeForDigest(),
+                hiveClientConfig.getMaxNumberOfPartitionsToRetrieveForDigest(),
                 hiveClientConfig.getHiveStorageFormat(),
                 new TypeRegistry());
         splitManager = new HiveSplitManager(
@@ -659,8 +665,10 @@ public abstract class AbstractTestHiveClient
                 .put(columnHandles.get(columnIndex.get("t_boolean")), new SerializableNativeValue(Boolean.class, testBoolean))
                 .build();
 
-        ConnectorPartitionResult partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.withNullableFixedValues(bindings));
-        List<ConnectorSplit> splits = getAllSplits(splitManager.getPartitionSplits(tableHandle, partitionResult.getPartitions()));
+//        ConnectorPartitionResult partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.withNullableFixedValues(bindings));
+//        List<ConnectorSplit> splits = getAllSplits(splitManager.getPartitionSplits(tableHandle, partitionResult.getPartitions()));
+        List<ConnectorSplit> splits = getAllSplits(splitManager.getSplits(getConnectorTableLayoutHandle(tableHandle, TupleDomain.withNullableFixedValues(bindings))));
+
         assertEquals(splits.size(), 1);
 
         try (ConnectorPageSource pageSource = pageSourceProvider.createPageSource(splits.get(0), columnHandles)) {
@@ -713,8 +721,9 @@ public abstract class AbstractTestHiveClient
             throws Exception
     {
         // the bucketed test tables should have exactly 32 splits
-        ConnectorPartitionResult partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.<ColumnHandle>all());
-        List<ConnectorSplit> splits = getAllSplits(splitManager.getPartitionSplits(tableHandle, partitionResult.getPartitions()));
+//        ConnectorPartitionResult partitionResult = splitManager.getPartitions(tableHandle, TupleDomain.<ColumnHandle>all());
+//        List<ConnectorSplit> splits = getAllSplits(splitManager.getPartitionSplits(tableHandle, partitionResult.getPartitions()));
+        List<ConnectorSplit> splits = getAllSplits(splitManager.getSplits(getConnectorTableLayoutHandle(tableHandle, TupleDomain.<ColumnHandle>all())));
         assertEquals(splits.size(), 32);
 
         // verify all paths are unique
@@ -722,6 +731,12 @@ public abstract class AbstractTestHiveClient
         for (ConnectorSplit split : splits) {
             assertTrue(paths.add(((HiveSplit) split).getPath()));
         }
+    }
+
+    protected ConnectorTableLayoutHandle getConnectorTableLayoutHandle(ConnectorTableHandle tableHandle, TupleDomain<ColumnHandle> constraint)
+    {
+        HiveTableHandle hiveTableHandle = checkType(tableHandle, HiveTableHandle.class, "tableHandle");
+        return new HiveTableLayoutHandle(connectorId, hiveTableHandle, constraint);
     }
 
     @Test

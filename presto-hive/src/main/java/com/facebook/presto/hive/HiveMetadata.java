@@ -14,33 +14,47 @@
 package com.facebook.presto.hive;
 
 import com.facebook.presto.hive.metastore.HiveMetastore;
-import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ColumnHandle;
+import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorInsertTableHandle;
 import com.facebook.presto.spi.ConnectorMetadata;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ConnectorTableHandle;
+import com.facebook.presto.spi.ConnectorTableLayout;
+import com.facebook.presto.spi.ConnectorTableLayoutHandle;
+import com.facebook.presto.spi.ConnectorTableLayoutResult;
 import com.facebook.presto.spi.ConnectorTableMetadata;
+import com.facebook.presto.spi.Constraint;
+import com.facebook.presto.spi.LocalProperty;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaNotFoundException;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.SchemaTablePrefix;
 import com.facebook.presto.spi.TableNotFoundException;
+import com.facebook.presto.spi.TupleDomain;
 import com.facebook.presto.spi.ViewNotFoundException;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
+import com.google.common.base.Charsets;
 import com.google.common.base.Function;
 import com.google.common.base.StandardSystemProperty;
+import com.google.common.base.Strings;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.hash.HashFunction;
+import com.google.common.hash.Hasher;
+import com.google.common.hash.Hashing;
 import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
+import io.airlift.slice.Slices;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
@@ -49,9 +63,14 @@ import org.joda.time.DateTimeZone;
 import javax.inject.Inject;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
 import static com.facebook.presto.hive.HiveColumnHandle.SAMPLE_WEIGHT_COLUMN_NAME;
@@ -63,6 +82,7 @@ import static com.facebook.presto.hive.HiveSessionProperties.getHiveStorageForma
 import static com.facebook.presto.hive.HiveUtil.PRESTO_VIEW_FLAG;
 import static com.facebook.presto.hive.HiveUtil.decodeViewData;
 import static com.facebook.presto.hive.HiveUtil.encodeViewData;
+import static com.facebook.presto.hive.HiveUtil.getPartitionKeyColumnHandles;
 import static com.facebook.presto.hive.HiveUtil.hiveColumnHandles;
 import static com.facebook.presto.hive.HiveUtil.schemaTableName;
 import static com.facebook.presto.hive.util.Types.checkType;
@@ -85,10 +105,15 @@ public class HiveMetadata
 {
     private static final Logger log = Logger.get(HiveMetadata.class);
 
+    private static final String LAST_UPDATED_TIMESTAMP = "transient_lastDdlTime";
+
     private final String connectorId;
     private final boolean allowDropTable;
     private final boolean allowRenameTable;
     private final boolean allowCorruptWritesForTesting;
+    private final boolean assumeCanonicalPartitionKeys;
+    private final boolean useTableLastModifiedTimeForDigest;
+    private final int maxNumberOfPartitionsToRetrieveForDigest;
     private final HiveMetastore metastore;
     private final HdfsEnvironment hdfsEnvironment;
     private final DateTimeZone timeZone;
@@ -112,6 +137,9 @@ public class HiveMetadata
                 hiveClientConfig.getAllowDropTable(),
                 hiveClientConfig.getAllowRenameTable(),
                 hiveClientConfig.getAllowCorruptWritesForTesting(),
+                hiveClientConfig.isAssumeCanonicalPartitionKeys(),
+                hiveClientConfig.isUseTableLastModifiedTimeForDigest(),
+                hiveClientConfig.getMaxNumberOfPartitionsToRetrieveForDigest(),
                 hiveClientConfig.getHiveStorageFormat(),
                 typeManager);
     }
@@ -124,6 +152,9 @@ public class HiveMetadata
             boolean allowDropTable,
             boolean allowRenameTable,
             boolean allowCorruptWritesForTesting,
+            boolean assumeCanonicalPartitionKeys,
+            boolean useTableLastModifiedTimeForDigest,
+            int maxNumberOfPartitionsToRetrieveForDigest,
             HiveStorageFormat hiveStorageFormat,
             TypeManager typeManager)
     {
@@ -132,6 +163,9 @@ public class HiveMetadata
         this.allowDropTable = allowDropTable;
         this.allowRenameTable = allowRenameTable;
         this.allowCorruptWritesForTesting = allowCorruptWritesForTesting;
+        this.assumeCanonicalPartitionKeys = assumeCanonicalPartitionKeys;
+        this.useTableLastModifiedTimeForDigest = useTableLastModifiedTimeForDigest;
+        this.maxNumberOfPartitionsToRetrieveForDigest = maxNumberOfPartitionsToRetrieveForDigest;
 
         this.metastore = checkNotNull(metastore, "metastore is null");
         this.hdfsEnvironment = checkNotNull(hdfsEnvironment, "hdfsEnvironment is null");
@@ -194,6 +228,129 @@ public class HiveMetadata
         catch (NoSuchObjectException e) {
             throw new TableNotFoundException(tableName);
         }
+    }
+
+    @Override
+    public Optional<Slice> computeDigest(ConnectorTableHandle tableHandle, ConnectorTableLayoutHandle tableLayoutHandle)
+    {
+        checkNotNull(tableHandle, "tableHandle is null");
+        checkNotNull(tableLayoutHandle, "tableLayoutHandle is null");
+
+        HiveTableLayoutHandle hiveTableLayoutHandle = checkType(tableLayoutHandle, HiveTableLayoutHandle.class, "tableLayoutHandle");
+
+        SchemaTableName schemaTableName = schemaTableName(tableHandle);
+        Table table = null;
+        try {
+            table = metastore.getTable(schemaTableName.getSchemaName(), schemaTableName.getTableName());
+            HiveUtil.checkTableOffline(table, schemaTableName);
+        }
+        catch (NoSuchObjectException | TableOfflineException e) {
+            log.debug(e.getMessage());
+            return Optional.empty();
+        }
+
+        TupleDomain<ColumnHandle> effectivePredicate = hiveTableLayoutHandle.getConstraint();
+
+        List<HiveColumnHandle> partitionColumns = getPartitionKeyColumnHandles(connectorId, table, 0);
+        List<String> filteredPartitionNames = HiveUtil.filterPartitionNames(partitionColumns, effectivePredicate, assumeCanonicalPartitionKeys);
+        List<String> partitionNames = null;
+        try {
+            // fetch the partition names
+            partitionNames = metastore.getPartitionNamesByParts(schemaTableName.getSchemaName(), schemaTableName.getTableName(), filteredPartitionNames);
+        }
+        catch (NoSuchObjectException e) {
+            log.debug(e.getMessage());
+            return Optional.empty();
+        }
+
+        try {
+            HashFunction hashFunction = Hashing.sha256();
+            Hasher hasher = hashFunction.newHasher();
+
+            if (partitionNames.size() == 1 && partitionNames.get(0).equals(HivePartition.UNPARTITIONED_ID)) {
+                return computeDigestWithTableMetadata(schemaTableName, hasher);
+            }
+
+            Map<String, Partition> partitions = metastore.getCachedPartitionsByNames(schemaTableName.getSchemaName(), schemaTableName.getTableName(), partitionNames);
+            if (partitions.size() < partitionNames.size()) {
+                int numberOfPartitionMissingInCache = partitionNames.size() - partitions.size();
+                if (numberOfPartitionMissingInCache <= maxNumberOfPartitionsToRetrieveForDigest) {
+                    partitions = metastore.getPartitionsByNames(schemaTableName.getSchemaName(), schemaTableName.getTableName(), partitionNames);
+                }
+                else {
+                    return computeDigestWithTableMetadata(schemaTableName, hasher);
+                }
+            }
+
+            List<String> keys = new ArrayList<>(partitions.keySet());
+            Collections.sort(keys);
+
+            for (String partitionName : keys) {
+                Partition partition = partitions.get(partitionName);
+                String lastUpdateTimestamp = partition.getParameters().get(LAST_UPDATED_TIMESTAMP);
+                hasher.putString(lastUpdateTimestamp, Charsets.UTF_8);
+                hasher.putChar('|');
+                hasher.putString(partitionName, Charsets.UTF_8);
+            }
+
+            return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
+        }
+        catch (NoSuchObjectException e) {
+            throw Throwables.propagate(e);
+        }
+        catch (UnsupportedOperationException e) {
+            log.debug(e.getMessage());
+        }
+
+        return Optional.empty();
+
+    }
+
+    private Optional<Slice> computeDigestWithTableMetadata(SchemaTableName tableName, Hasher hasher)
+            throws NoSuchObjectException
+    {
+        if (!useTableLastModifiedTimeForDigest) {
+            return Optional.empty();
+        }
+
+        Table table = metastore.getTable(tableName.getSchemaName(), tableName.getTableName());
+        String lastUpdateTimestamp = table.getParameters().get(LAST_UPDATED_TIMESTAMP);
+        if (Strings.isNullOrEmpty(lastUpdateTimestamp)) {
+            return Optional.empty();
+        }
+        hasher.putString(lastUpdateTimestamp, Charsets.UTF_8);
+        hasher.putChar('|');
+        hasher.putString(tableName.getTableName(), Charsets.UTF_8);
+
+        return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
+    }
+
+    @Override
+    public List<ConnectorTableLayoutResult> getTableLayouts(ConnectorTableHandle tableHandle, Constraint<ColumnHandle> constraint, Optional<Set<ColumnHandle>> desiredColumns)
+    {
+        HiveTableHandle hiveTableHandle = checkType(tableHandle, HiveTableHandle.class, "tableHandle");
+
+        HiveTableLayoutHandle hiveTableLayoutHandle =
+                new HiveTableLayoutHandle(connectorId, hiveTableHandle, constraint.getSummary());
+
+        ConnectorTableLayoutResult connectorTableLayoutResult =
+                new ConnectorTableLayoutResult(getTableLayout(hiveTableLayoutHandle), TupleDomain.<ColumnHandle>all());
+
+        return Arrays.asList(connectorTableLayoutResult);
+    }
+
+    @Override
+    public ConnectorTableLayout getTableLayout(ConnectorTableLayoutHandle tableLayoutHandle)
+    {
+        HiveTableLayoutHandle hiveTableLayoutHandle = checkType(tableLayoutHandle, HiveTableLayoutHandle.class, "tableLayoutHandle");
+
+        return new ConnectorTableLayout(
+                tableLayoutHandle,
+                Optional.empty(),
+                hiveTableLayoutHandle.getConstraint(),
+                Optional.empty(),
+                Optional.empty(),
+                new ArrayList<LocalProperty<ColumnHandle>>());
     }
 
     @Override

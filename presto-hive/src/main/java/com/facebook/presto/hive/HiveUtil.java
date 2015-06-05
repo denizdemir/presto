@@ -13,11 +13,14 @@
  */
 package com.facebook.presto.hive;
 
+import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorTableHandle;
+import com.facebook.presto.spi.Domain;
 import com.facebook.presto.spi.ErrorCodeSupplier;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaTableName;
 import com.facebook.presto.spi.SerializableNativeValue;
+import com.facebook.presto.spi.TupleDomain;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
@@ -30,6 +33,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.JavaUtils;
+import org.apache.hadoop.hive.metastore.ProtectMode;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.ql.io.SymlinkTextInputFormat;
@@ -57,6 +61,7 @@ import org.joda.time.format.ISODateTimeFormat;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Properties;
@@ -86,6 +91,7 @@ import static com.facebook.presto.hive.util.Types.checkType;
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Predicates.not;
+import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.collect.Iterables.filter;
 import static com.google.common.collect.Lists.transform;
 import static io.airlift.slice.Slices.utf8Slice;
@@ -95,6 +101,7 @@ import static java.lang.Long.parseLong;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.apache.hadoop.hive.metastore.MetaStoreUtils.getTableMetadata;
+import static org.apache.hadoop.hive.metastore.ProtectMode.getProtectModeFromString;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.FILE_INPUT_FORMAT;
 import static org.apache.hadoop.hive.serde.serdeConstants.SERIALIZATION_LIB;
 import static org.apache.hadoop.hive.serde2.ColumnProjectionUtils.READ_ALL_COLUMNS;
@@ -104,9 +111,11 @@ import static org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector.Cate
 public final class HiveUtil
 {
     public static final String PRESTO_VIEW_FLAG = "presto_view";
+    public static final String PRESTO_OFFLINE = "presto_offline";
 
     private static final String VIEW_PREFIX = "/* Presto View: ";
     private static final String VIEW_SUFFIX = " */";
+    private static final String PARTITION_VALUE_WILDCARD = "";
 
     private static final DateTimeFormatter HIVE_DATE_PARSER = ISODateTimeFormat.date().withZoneUTC();
     private static final DateTimeFormatter HIVE_TIMESTAMP_PARSER;
@@ -551,5 +560,52 @@ public final class HiveUtil
         if (!condition) {
             throw new PrestoException(errorCode, format(formatString, args));
         }
+    }
+
+    public static void checkTableOffline(Table table, SchemaTableName schemaTableName)
+    {
+        String protectMode = table.getParameters().get(ProtectMode.PARAMETER_NAME);
+        if (protectMode != null && getProtectModeFromString(protectMode).offline) {
+            throw new TableOfflineException(schemaTableName);
+        }
+
+        String prestoOffline = table.getParameters().get(PRESTO_OFFLINE);
+        if (!isNullOrEmpty(prestoOffline)) {
+            throw new TableOfflineException(schemaTableName, format("Table '%s' is offline for Presto: %s", schemaTableName, prestoOffline));
+        }
+    }
+
+    public static List<String> filterPartitionNames(List<HiveColumnHandle> partitionKeys, TupleDomain<ColumnHandle> effectivePredicate, boolean assumeCanonicalPartitionKeys)
+    {
+        List<String> filter = new ArrayList<>();
+        for (HiveColumnHandle partitionKey : partitionKeys) {
+            Domain domain = effectivePredicate.getDomains().get(partitionKey);
+            if (domain != null && domain.isNullableSingleValue()) {
+                Comparable<?> value = domain.getNullableSingleValue();
+                if (value == null) {
+                    filter.add(HivePartitionKey.HIVE_DEFAULT_DYNAMIC_PARTITION);
+                }
+                else if (value instanceof Slice) {
+                    filter.add(((Slice) value).toStringUtf8());
+                }
+                else if ((value instanceof Boolean) || (value instanceof Double) || (value instanceof Long)) {
+                    if (assumeCanonicalPartitionKeys) {
+                        filter.add(value.toString());
+                    }
+                    else {
+                        // Hive treats '0', 'false', and 'False' the same. However, the metastore differentiates between these.
+                        filter.add(PARTITION_VALUE_WILDCARD);
+                    }
+                }
+                else {
+                    throw new PrestoException(NOT_SUPPORTED, "Only Boolean, Double and Long partition keys are supported");
+                }
+            }
+            else {
+                filter.add(PARTITION_VALUE_WILDCARD);
+            }
+        }
+
+        return filter;
     }
 }

@@ -66,6 +66,14 @@ public class ClassLoaderSafeConnectorMetadata
     }
 
     @Override
+    public Optional<Slice> computeDigest(ConnectorTableHandle tableHandle, ConnectorTableLayoutHandle tableLayoutHandle)
+    {
+        try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
+            return delegate.computeDigest(tableHandle, tableLayoutHandle);
+        }
+    }
+
+    @Override
     public List<String> listSchemaNames(ConnectorSession session)
     {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {

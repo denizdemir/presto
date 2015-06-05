@@ -14,20 +14,13 @@
 package com.facebook.presto.split;
 
 import com.facebook.presto.metadata.LegacyTableLayoutHandle;
-import com.facebook.presto.metadata.TableHandle;
 import com.facebook.presto.metadata.TableLayoutHandle;
-import com.facebook.presto.spi.ColumnHandle;
-import com.facebook.presto.spi.ConnectorPartition;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorSplitManager;
 import com.facebook.presto.spi.ConnectorSplitSource;
 import com.facebook.presto.spi.FixedSplitSource;
-import com.facebook.presto.spi.TupleDomain;
 import com.google.common.collect.ImmutableList;
-import io.airlift.slice.Slice;
 
-import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -72,17 +65,12 @@ public class SplitManager
         return result;
     }
 
-//    public Optional<Slice> computeDigest(TableHandle table, List<Partition> partitions)
-    public Optional<Slice> computeDigest(TableHandle table, TupleDomain<ColumnHandle> tupleDomain)
-    {
-        ConnectorSplitManager splitManager = getConnectorSplitManager(table.getConnectorId());
-        List<ConnectorPartition> connectorPartitions =
-                splitManager.getPartitions(table.getConnectorHandle(), tupleDomain).getPartitions();
-
-//        List<ConnectorPartition> connectorPartitions = partitions.stream()
-//                .map(Partition::getConnectorPartition)
-//                .collect(ImmutableCollectors.toImmutableList());
-
-        return splitManager.computeDigest(table.getConnectorHandle(), connectorPartitions);
-    }
+//    public Optional<Slice> computeDigest(TableHandle table, TupleDomain<ColumnHandle> tupleDomain)
+//    {
+//        ConnectorSplitManager splitManager = getConnectorSplitManager(table.getConnectorId());
+//        List<ConnectorPartition> connectorPartitions =
+//                splitManager.getPartitions(table.getConnectorHandle(), tupleDomain).getPartitions();
+//
+//        return splitManager.computeDigest(table.getConnectorHandle(), connectorPartitions);
+//    }
 }

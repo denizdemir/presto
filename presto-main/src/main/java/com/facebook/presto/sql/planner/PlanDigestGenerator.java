@@ -16,16 +16,17 @@ package com.facebook.presto.sql.planner;
 //import com.facebook.presto.metadata.ColumnHandle;
 //import com.facebook.presto.metadata.Partition;
 //import com.facebook.presto.metadata.PartitionResult;
-import com.facebook.presto.spi.ColumnHandle;
+
+import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.Signature;
 import com.facebook.presto.metadata.TypeParameter;
+import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.Domain;
 import com.facebook.presto.spi.Marker;
 import com.facebook.presto.spi.Range;
 import com.facebook.presto.spi.SortedRangeSet;
 import com.facebook.presto.spi.block.SortOrder;
 import com.facebook.presto.spi.type.TypeSignature;
-import com.facebook.presto.split.SplitManager;
 import com.facebook.presto.sql.planner.plan.AggregationNode;
 import com.facebook.presto.sql.planner.plan.DistinctLimitNode;
 import com.facebook.presto.sql.planner.plan.ExchangeNode;
@@ -66,6 +67,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -74,12 +76,13 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class PlanDigestGenerator
 {
-    private final SplitManager splitManager;
+//    private final SplitManager splitManager;
+    private final Metadata metadata;
 
     @Inject
-    public PlanDigestGenerator(SplitManager splitManager)
+    public PlanDigestGenerator(Metadata metadata)
     {
-        this.splitManager = splitManager;
+        this.metadata = metadata;
     }
 
     public PlanDigest generate(Plan plan)
@@ -95,28 +98,25 @@ public class PlanDigestGenerator
         @Override
         public PlanDigest visitTableScan(TableScanNode node, Void context)
         {
-//            List<Partition> partitions;
-//            if (node.getGeneratedPartitions().isPresent()) {
-//                partitions = node.getGeneratedPartitions().get().getPartitions();
-//            }
-//            else {
-//                PartitionResult allPartitions = splitManager.getPartitions(node.getTable(), Optional.empty());
-//                partitions = allPartitions.getPartitions();
-//            }
+            Optional<Slice> digest = null;
+            try {
+                digest = metadata.computeDigest(node.getTable(), node.getLayout().get());
 
-//            Optional<Slice> partitionDigest = splitManager.computeDigest(node.getTable(), partitions);
-            Optional<Slice> partitionDigest = splitManager.computeDigest(node.getTable(), node.getCurrentConstraint());
+            }
+            catch (UnsupportedOperationException | NoSuchElementException e) {
+                digest = Optional.empty();
+            }
 
-            if (!partitionDigest.isPresent()) {
+            if (!digest.isPresent()) {
                 // connector did not generate digest for the partitions, return a random digest
                 return generateRandomDigest();
             }
 
-            PlanDigest digest = new PlanDigest();
-            digest.update(partitionDigest.get().getBytes());
-            updateDigestWithSymbols(digest, node.getOutputSymbols());
+            PlanDigest planDigest = new PlanDigest();
+            planDigest.update(digest.get().getBytes());
+            updateDigestWithSymbols(planDigest, node.getOutputSymbols());
 
-            return digest;
+            return planDigest;
         }
 
         @Override

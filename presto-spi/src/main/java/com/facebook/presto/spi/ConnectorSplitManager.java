@@ -13,10 +13,7 @@
  */
 package com.facebook.presto.spi;
 
-import io.airlift.slice.Slice;
-
 import java.util.List;
-import java.util.Optional;
 
 public interface ConnectorSplitManager
 {
@@ -38,10 +35,10 @@ public interface ConnectorSplitManager
      * the partitions or the table. It should generate the same digest for the same set of partitions as long as
      * those partitions would not produce a different dataset for table scan.
      */
-    default Optional<Slice> computeDigest(ConnectorTableHandle table, List<ConnectorPartition> connectorPartitions)
-    {
-        return Optional.empty();
-    }
+//    default Optional<Slice> computeDigest(ConnectorTableHandle table, List<ConnectorPartition> connectorPartitions)
+//    {
+//        return Optional.empty();
+//    }
 
     /**
      * Gets the Splits for the specified Partitions in the indicated table.

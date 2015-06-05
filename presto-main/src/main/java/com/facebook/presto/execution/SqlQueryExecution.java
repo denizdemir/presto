@@ -248,7 +248,7 @@ public final class SqlQueryExecution
             Plan plan = logicalPlanner.plan(analysis);
 
             // compute cache digest for the generated plan
-            PlanDigestGenerator planDigestGenerator = new PlanDigestGenerator(splitManager);
+            PlanDigestGenerator planDigestGenerator = new PlanDigestGenerator(metadata);
             PlanDigest planDigest = planDigestGenerator.generate(plan);
             stateMachine.setPlanDigest(Optional.of(planDigest));
 
@@ -388,6 +388,7 @@ public final class SqlQueryExecution
                 queryInfo.getSelf(),
                 queryInfo.getFieldNames(),
                 queryInfo.getQuery(),
+                queryInfo.getQueryDigest(),
                 queryInfo.getQueryStats(),
                 queryInfo.getSetSessionProperties(),
                 queryInfo.getResetSessionProperties(),

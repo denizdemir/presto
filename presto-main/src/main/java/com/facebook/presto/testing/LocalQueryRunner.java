@@ -370,7 +370,7 @@ public class LocalQueryRunner
         Analysis analysis = analyzer.analyze(statement);
         Plan plan = new LogicalPlanner(session, planOptimizersFactory.get(), idAllocator, metadata).plan(analysis);
 
-        PlanDigestGenerator planDigestGenerator = new PlanDigestGenerator(splitManager);
+        PlanDigestGenerator planDigestGenerator = new PlanDigestGenerator(getMetadata());
         PlanDigest planDigest = planDigestGenerator.generate(plan);
 
         checkState(planDigest != null, "Digest is null for query: " + sql);

@@ -13,15 +13,13 @@
  */
 package com.facebook.presto.hive;
 
-import com.facebook.presto.hadoop.shaded.com.google.common.base.Strings;
 import com.facebook.presto.hive.metastore.HiveMetastore;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorPartition;
-import com.facebook.presto.spi.ConnectorPartitionResult;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorSplitManager;
 import com.facebook.presto.spi.ConnectorSplitSource;
-import com.facebook.presto.spi.ConnectorTableHandle;
+import com.facebook.presto.spi.ConnectorTableLayoutHandle;
 import com.facebook.presto.spi.Domain;
 import com.facebook.presto.spi.FixedSplitSource;
 import com.facebook.presto.spi.PrestoException;
@@ -30,24 +28,15 @@ import com.facebook.presto.spi.SerializableNativeValue;
 import com.facebook.presto.spi.SortedRangeSet;
 import com.facebook.presto.spi.TableNotFoundException;
 import com.facebook.presto.spi.TupleDomain;
-import com.google.common.base.Charsets;
 import com.google.common.base.Function;
-import com.google.common.base.Predicates;
 import com.google.common.base.Throwables;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
-import com.google.common.hash.HashFunction;
-import com.google.common.hash.Hasher;
-import com.google.common.hash.Hashing;
 import io.airlift.concurrent.BoundedExecutor;
 import io.airlift.log.Logger;
-import io.airlift.slice.Slice;
-import io.airlift.slice.Slices;
 import io.airlift.units.DataSize;
 import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.metastore.ProtectMode;
@@ -61,7 +50,6 @@ import org.joda.time.DateTimeZone;
 import javax.inject.Inject;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -77,15 +65,12 @@ import static com.facebook.presto.hive.HiveErrorCode.HIVE_PARTITION_SCHEMA_MISMA
 import static com.facebook.presto.hive.HivePartition.UNPARTITIONED_ID;
 import static com.facebook.presto.hive.HiveUtil.getPartitionKeyColumnHandles;
 import static com.facebook.presto.hive.HiveUtil.parsePartitionValue;
-import static com.facebook.presto.hive.HiveUtil.schemaTableName;
 import static com.facebook.presto.hive.UnpartitionedPartition.UNPARTITIONED_PARTITION;
 import static com.facebook.presto.hive.util.Types.checkType;
-import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.StandardErrorCode.SERVER_SHUTTING_DOWN;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.base.Predicates.not;
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.collect.Iterables.concat;
 import static com.google.common.collect.Iterables.getOnlyElement;
@@ -194,43 +179,44 @@ public class HiveSplitManager
         this.maxNumberOfPartitionsToRetrieveForDigest = maxNumberOfPartitionsToRetrieveForDigest;
     }
 
-    @Override
-    public ConnectorPartitionResult getPartitions(ConnectorTableHandle tableHandle, TupleDomain<ColumnHandle> effectivePredicate)
-    {
-        checkNotNull(tableHandle, "tableHandle is null");
-        checkNotNull(effectivePredicate, "effectivePredicate is null");
-
-        if (effectivePredicate.isNone()) {
-            return new ConnectorPartitionResult(ImmutableList.of(), TupleDomain.none());
-        }
-
-        SchemaTableName tableName = schemaTableName(tableHandle);
-        Table table = getTable(tableName);
-        Optional<HiveBucketing.HiveBucket> bucket = getHiveBucket(table, effectivePredicate.extractFixedValues());
-
-        TupleDomain<HiveColumnHandle> compactEffectivePredicate = toCompactTupleDomain(effectivePredicate);
-
-        if (table.getPartitionKeys().isEmpty()) {
-            return new ConnectorPartitionResult(ImmutableList.of(new HivePartition(tableName, compactEffectivePredicate, bucket)), effectivePredicate);
-        }
-
-        List<HiveColumnHandle> partitionColumns = getPartitionKeyColumnHandles(connectorId, table, 0);
-        List<String> partitionNames = getFilteredPartitionNames(tableName, partitionColumns, effectivePredicate);
-
-        // do a final pass to filter based on fields that could not be used to filter the partitions
-        ImmutableList.Builder<ConnectorPartition> partitions = ImmutableList.builder();
-        for (String partitionName : partitionNames) {
-            Optional<Map<ColumnHandle, SerializableNativeValue>> values = parseValuesAndFilterPartition(partitionName, partitionColumns, effectivePredicate);
-
-            if (values.isPresent()) {
-                partitions.add(new HivePartition(tableName, compactEffectivePredicate, partitionName, values.get(), bucket));
-            }
-        }
-
-        // All partition key domains will be fully evaluated, so we don't need to include those
-        TupleDomain<ColumnHandle> remainingTupleDomain = TupleDomain.withColumnDomains(Maps.filterKeys(effectivePredicate.getDomains(), not(Predicates.<ColumnHandle>in(partitionColumns))));
-        return new ConnectorPartitionResult(partitions.build(), remainingTupleDomain);
-    }
+    // remove depracated methods
+//    @Override
+//    public ConnectorPartitionResult getPartitions(ConnectorTableHandle tableHandle, TupleDomain<ColumnHandle> effectivePredicate)
+//    {
+//        checkNotNull(tableHandle, "tableHandle is null");
+//        checkNotNull(effectivePredicate, "effectivePredicate is null");
+//
+//        if (effectivePredicate.isNone()) {
+//            return new ConnectorPartitionResult(ImmutableList.of(), TupleDomain.none());
+//        }
+//
+//        SchemaTableName tableName = schemaTableName(tableHandle);
+//        Table table = getTable(tableName);
+//        Optional<HiveBucketing.HiveBucket> bucket = getHiveBucket(table, effectivePredicate.extractFixedValues());
+//
+//        TupleDomain<HiveColumnHandle> compactEffectivePredicate = toCompactTupleDomain(effectivePredicate);
+//
+//        if (table.getPartitionKeys().isEmpty()) {
+//            return new ConnectorPartitionResult(ImmutableList.of(new HivePartition(tableName, compactEffectivePredicate, bucket)), effectivePredicate);
+//        }
+//
+//        List<HiveColumnHandle> partitionColumns = getPartitionKeyColumnHandles(connectorId, table, 0);
+//        List<String> partitionNames = getFilteredPartitionNames(tableName, partitionColumns, effectivePredicate);
+//
+//        // do a final pass to filter based on fields that could not be used to filter the partitions
+//        ImmutableList.Builder<ConnectorPartition> partitions = ImmutableList.builder();
+//        for (String partitionName : partitionNames) {
+//            Optional<Map<ColumnHandle, SerializableNativeValue>> values = parseValuesAndFilterPartition(partitionName, partitionColumns, effectivePredicate);
+//
+//            if (values.isPresent()) {
+//                partitions.add(new HivePartition(tableName, compactEffectivePredicate, partitionName, values.get(), bucket));
+//            }
+//        }
+//
+//        // All partition key domains will be fully evaluated, so we don't need to include those
+//        TupleDomain<ColumnHandle> remainingTupleDomain = TupleDomain.withColumnDomains(Maps.filterKeys(effectivePredicate.getDomains(), not(Predicates.<ColumnHandle>in(partitionColumns))));
+//        return new ConnectorPartitionResult(partitions.build(), remainingTupleDomain);
+//    }
 
     private static TupleDomain<HiveColumnHandle> toCompactTupleDomain(TupleDomain<ColumnHandle> effectivePredicate)
     {
@@ -249,74 +235,74 @@ public class HiveSplitManager
         return TupleDomain.withColumnDomains(builder.build());
     }
 
-    public Optional<Slice> computeDigest(ConnectorTableHandle tableHandle, List<ConnectorPartition> connectorPartitions)
-    {
-        checkNotNull(tableHandle, "tableHandle is null");
-        checkNotNull(connectorPartitions, "connectorPartitions is null");
-
-        SchemaTableName tableName = schemaTableName(tableHandle);
-        List<String> partitionNames = Lists.transform(connectorPartitions, partition -> partition.getPartitionId());
-
-        try {
-            HashFunction hashFunction = Hashing.sha256();
-            Hasher hasher = hashFunction.newHasher();
-
-            if (partitionNames.size() == 1 && partitionNames.get(0).equals(HivePartition.UNPARTITIONED_ID)) {
-                return computeDigestWithTableMetadata(tableName, hasher);
-            }
-
-            Map<String, Partition> partitions = metastore.getCachedPartitionsByNames(tableName.getSchemaName(), tableName.getTableName(), partitionNames);
-            if (partitions.size() < partitionNames.size()) {
-                int numberOfPartitionMissingInCache = partitionNames.size() - partitions.size();
-                if (numberOfPartitionMissingInCache <= maxNumberOfPartitionsToRetrieveForDigest) {
-                    partitions = metastore.getPartitionsByNames(tableName.getSchemaName(), tableName.getTableName(), partitionNames);
-                }
-                else {
-                    return computeDigestWithTableMetadata(tableName, hasher);
-                }
-            }
-
-            List<String> keys = new ArrayList<>(partitions.keySet());
-            Collections.sort(keys);
-
-            for (String partitionName : keys) {
-                Partition partition = partitions.get(partitionName);
-                String lastUpdateTimestamp = partition.getParameters().get(LAST_UPDATED_TIMESTAMP);
-                hasher.putString(lastUpdateTimestamp, Charsets.UTF_8);
-                hasher.putChar('|');
-                hasher.putString(partitionName, Charsets.UTF_8);
-            }
-
-            return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
-        }
-        catch (NoSuchObjectException e) {
-            throw Throwables.propagate(e);
-        }
-        catch (UnsupportedOperationException e) {
-            log.debug(e.getMessage());
-        }
-
-        return Optional.empty();
-    }
-
-    private Optional<Slice> computeDigestWithTableMetadata(SchemaTableName tableName, Hasher hasher)
-            throws NoSuchObjectException
-    {
-        if (!useTableLastModifiedTimeForDigest) {
-            return Optional.empty();
-        }
-
-        Table table = metastore.getTable(tableName.getSchemaName(), tableName.getTableName());
-        String lastUpdateTimestamp = table.getParameters().get(LAST_UPDATED_TIMESTAMP);
-        if (Strings.isNullOrEmpty(lastUpdateTimestamp)) {
-            return Optional.empty();
-        }
-        hasher.putString(lastUpdateTimestamp, Charsets.UTF_8);
-        hasher.putChar('|');
-        hasher.putString(tableName.getTableName(), Charsets.UTF_8);
-
-        return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
-    }
+//    public Optional<Slice> computeDigest(ConnectorTableHandle tableHandle, List<ConnectorPartition> connectorPartitions)
+//    {
+//        checkNotNull(tableHandle, "tableHandle is null");
+//        checkNotNull(connectorPartitions, "connectorPartitions is null");
+//
+//        SchemaTableName tableName = schemaTableName(tableHandle);
+//        List<String> partitionNames = Lists.transform(connectorPartitions, partition -> partition.getPartitionId());
+//
+//        try {
+//            HashFunction hashFunction = Hashing.sha256();
+//            Hasher hasher = hashFunction.newHasher();
+//
+//            if (partitionNames.size() == 1 && partitionNames.get(0).equals(HivePartition.UNPARTITIONED_ID)) {
+//                return computeDigestWithTableMetadata(tableName, hasher);
+//            }
+//
+//            Map<String, Partition> partitions = metastore.getCachedPartitionsByNames(tableName.getSchemaName(), tableName.getTableName(), partitionNames);
+//            if (partitions.size() < partitionNames.size()) {
+//                int numberOfPartitionMissingInCache = partitionNames.size() - partitions.size();
+//                if (numberOfPartitionMissingInCache <= maxNumberOfPartitionsToRetrieveForDigest) {
+//                    partitions = metastore.getPartitionsByNames(tableName.getSchemaName(), tableName.getTableName(), partitionNames);
+//                }
+//                else {
+//                    return computeDigestWithTableMetadata(tableName, hasher);
+//                }
+//            }
+//
+//            List<String> keys = new ArrayList<>(partitions.keySet());
+//            Collections.sort(keys);
+//
+//            for (String partitionName : keys) {
+//                Partition partition = partitions.get(partitionName);
+//                String lastUpdateTimestamp = partition.getParameters().get(LAST_UPDATED_TIMESTAMP);
+//                hasher.putString(lastUpdateTimestamp, Charsets.UTF_8);
+//                hasher.putChar('|');
+//                hasher.putString(partitionName, Charsets.UTF_8);
+//            }
+//
+//            return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
+//        }
+//        catch (NoSuchObjectException e) {
+//            throw Throwables.propagate(e);
+//        }
+//        catch (UnsupportedOperationException e) {
+//            log.debug(e.getMessage());
+//        }
+//
+//        return Optional.empty();
+//    }
+//
+//    private Optional<Slice> computeDigestWithTableMetadata(SchemaTableName tableName, Hasher hasher)
+//            throws NoSuchObjectException
+//    {
+//        if (!useTableLastModifiedTimeForDigest) {
+//            return Optional.empty();
+//        }
+//
+//        Table table = metastore.getTable(tableName.getSchemaName(), tableName.getTableName());
+//        String lastUpdateTimestamp = table.getParameters().get(LAST_UPDATED_TIMESTAMP);
+//        if (Strings.isNullOrEmpty(lastUpdateTimestamp)) {
+//            return Optional.empty();
+//        }
+//        hasher.putString(lastUpdateTimestamp, Charsets.UTF_8);
+//        hasher.putChar('|');
+//        hasher.putString(tableName.getTableName(), Charsets.UTF_8);
+//
+//        return Optional.of(Slices.wrappedBuffer(hasher.hash().asBytes()));
+//    }
 
     private Optional<Map<ColumnHandle, SerializableNativeValue>> parseValuesAndFilterPartition(String partitionName, List<HiveColumnHandle> partitionColumns, TupleDomain<ColumnHandle> predicate)
     {
@@ -337,67 +323,67 @@ public class HiveSplitManager
         return Optional.of(builder.build());
     }
 
-    private Table getTable(SchemaTableName tableName)
-    {
-        try {
-            Table table = metastore.getTable(tableName.getSchemaName(), tableName.getTableName());
+//    private Table getTable(SchemaTableName tableName)
+//    {
+//        try {
+//            Table table = metastore.getTable(tableName.getSchemaName(), tableName.getTableName());
+//
+//            String protectMode = table.getParameters().get(ProtectMode.PARAMETER_NAME);
+//            if (protectMode != null && getProtectModeFromString(protectMode).offline) {
+//                throw new TableOfflineException(tableName);
+//            }
+//
+//            String prestoOffline = table.getParameters().get(PRESTO_OFFLINE);
+//            if (!isNullOrEmpty(prestoOffline)) {
+//                throw new TableOfflineException(tableName, format("Table '%s' is offline for Presto: %s", tableName, prestoOffline));
+//            }
+//
+//            return table;
+//        }
+//        catch (NoSuchObjectException e) {
+//            throw new TableNotFoundException(tableName);
+//        }
+//    }
 
-            String protectMode = table.getParameters().get(ProtectMode.PARAMETER_NAME);
-            if (protectMode != null && getProtectModeFromString(protectMode).offline) {
-                throw new TableOfflineException(tableName);
-            }
-
-            String prestoOffline = table.getParameters().get(PRESTO_OFFLINE);
-            if (!isNullOrEmpty(prestoOffline)) {
-                throw new TableOfflineException(tableName, format("Table '%s' is offline for Presto: %s", tableName, prestoOffline));
-            }
-
-            return table;
-        }
-        catch (NoSuchObjectException e) {
-            throw new TableNotFoundException(tableName);
-        }
-    }
-
-    private List<String> getFilteredPartitionNames(SchemaTableName tableName, List<HiveColumnHandle> partitionKeys, TupleDomain<ColumnHandle> effectivePredicate)
-    {
-        List<String> filter = new ArrayList<>();
-        for (HiveColumnHandle partitionKey : partitionKeys) {
-            Domain domain = effectivePredicate.getDomains().get(partitionKey);
-            if (domain != null && domain.isNullableSingleValue()) {
-                Comparable<?> value = domain.getNullableSingleValue();
-                if (value == null) {
-                    filter.add(HivePartitionKey.HIVE_DEFAULT_DYNAMIC_PARTITION);
-                }
-                else if (value instanceof Slice) {
-                    filter.add(((Slice) value).toStringUtf8());
-                }
-                else if ((value instanceof Boolean) || (value instanceof Double) || (value instanceof Long)) {
-                    if (assumeCanonicalPartitionKeys) {
-                        filter.add(value.toString());
-                    }
-                    else {
-                        // Hive treats '0', 'false', and 'False' the same. However, the metastore differentiates between these.
-                        filter.add(PARTITION_VALUE_WILDCARD);
-                    }
-                }
-                else {
-                    throw new PrestoException(NOT_SUPPORTED, "Only Boolean, Double and Long partition keys are supported");
-                }
-            }
-            else {
-                filter.add(PARTITION_VALUE_WILDCARD);
-            }
-        }
-
-        try {
-            // fetch the partition names
-            return metastore.getPartitionNamesByParts(tableName.getSchemaName(), tableName.getTableName(), filter);
-        }
-        catch (NoSuchObjectException e) {
-            throw new TableNotFoundException(tableName);
-        }
-    }
+//    private List<String> getFilteredPartitionNames(SchemaTableName tableName, List<HiveColumnHandle> partitionKeys, TupleDomain<ColumnHandle> effectivePredicate)
+//    {
+//        List<String> filter = new ArrayList<>();
+//        for (HiveColumnHandle partitionKey : partitionKeys) {
+//            Domain domain = effectivePredicate.getDomains().get(partitionKey);
+//            if (domain != null && domain.isNullableSingleValue()) {
+//                Comparable<?> value = domain.getNullableSingleValue();
+//                if (value == null) {
+//                    filter.add(HivePartitionKey.HIVE_DEFAULT_DYNAMIC_PARTITION);
+//                }
+//                else if (value instanceof Slice) {
+//                    filter.add(((Slice) value).toStringUtf8());
+//                }
+//                else if ((value instanceof Boolean) || (value instanceof Double) || (value instanceof Long)) {
+//                    if (assumeCanonicalPartitionKeys) {
+//                        filter.add(value.toString());
+//                    }
+//                    else {
+//                        // Hive treats '0', 'false', and 'False' the same. However, the metastore differentiates between these.
+//                        filter.add(PARTITION_VALUE_WILDCARD);
+//                    }
+//                }
+//                else {
+//                    throw new PrestoException(NOT_SUPPORTED, "Only Boolean, Double and Long partition keys are supported");
+//                }
+//            }
+//            else {
+//                filter.add(PARTITION_VALUE_WILDCARD);
+//            }
+//        }
+//
+//        try {
+//            // fetch the partition names
+//            return metastore.getPartitionNamesByParts(tableName.getSchemaName(), tableName.getTableName(), filter);
+//        }
+//        catch (NoSuchObjectException e) {
+//            throw new TableNotFoundException(tableName);
+//        }
+//    }
 
     private static List<String> extractPartitionKeyValues(String partitionName)
     {
@@ -427,41 +413,129 @@ public class HiveSplitManager
         return values.build();
     }
 
+//    @Override
+//    public ConnectorSplitSource getPartitionSplits(ConnectorTableHandle tableHandle, List<ConnectorPartition> connectorPartitions)
+//    {
+//        HiveTableHandle hiveTableHandle = checkType(tableHandle, HiveTableHandle.class, "tableHandle");
+//
+//        checkNotNull(connectorPartitions, "connectorPartitions is null");
+//        List<HivePartition> partitions = Lists.transform(connectorPartitions, partition -> checkType(partition, HivePartition.class, "partition"));
+//
+//        HivePartition partition = Iterables.getFirst(partitions, null);
+//        if (partition == null) {
+//            return new FixedSplitSource(connectorId, ImmutableList.<ConnectorSplit>of());
+//        }
+//        SchemaTableName tableName = partition.getTableName();
+//        Optional<HiveBucketing.HiveBucket> bucket = partition.getBucket();
+//
+//        // sort partitions
+//        partitions = Ordering.natural().onResultOf(ConnectorPartition::getPartitionId).reverse().sortedCopy(partitions);
+//
+//        Table table;
+//        Iterable<HivePartitionMetadata> hivePartitions;
+//        try {
+//            table = metastore.getTable(tableName.getSchemaName(), tableName.getTableName());
+//            hivePartitions = getPartitionMetadata(table, tableName, partitions);
+//        }
+//        catch (NoSuchObjectException e) {
+//            throw new TableNotFoundException(tableName);
+//        }
+//
+//        HiveSplitLoader hiveSplitLoader = new BackgroundHiveSplitLoader(
+//                connectorId,
+//                table,
+//                hivePartitions,
+//                bucket,
+//                maxSplitSize,
+//                hiveTableHandle.getSession(),
+//                hdfsEnvironment,
+//                namenodeStats,
+//                directoryLister,
+//                executor,
+//                maxPartitionBatchSize,
+//                maxInitialSplitSize,
+//                maxInitialSplits,
+//                forceLocalScheduling,
+//                recursiveDfsWalkerEnabled);
+//
+//        HiveSplitSource splitSource = new HiveSplitSource(connectorId, maxOutstandingSplits, hiveSplitLoader);
+//        hiveSplitLoader.start(splitSource);
+//
+//        return splitSource;
+//    }
+
+    //implement this
     @Override
-    public ConnectorSplitSource getPartitionSplits(ConnectorTableHandle tableHandle, List<ConnectorPartition> connectorPartitions)
+    public ConnectorSplitSource getSplits(ConnectorTableLayoutHandle tableLayoutHandle)
     {
-        HiveTableHandle hiveTableHandle = checkType(tableHandle, HiveTableHandle.class, "tableHandle");
+        checkNotNull(tableLayoutHandle, "tableLayoutHandle");
+        HiveTableLayoutHandle hiveTableLayoutHandle = checkType(tableLayoutHandle, HiveTableLayoutHandle.class, "tableLayoutHandle");
 
-        checkNotNull(connectorPartitions, "connectorPartitions is null");
-        List<HivePartition> partitions = Lists.transform(connectorPartitions, partition -> checkType(partition, HivePartition.class, "partition"));
+        SchemaTableName schemaTableName = hiveTableLayoutHandle.getHiveTableHandle().getSchemaTableName();
+        Table table = null;
+        try {
+            table = metastore.getTable(schemaTableName.getSchemaName(), schemaTableName.getTableName());
+            HiveUtil.checkTableOffline(table, schemaTableName);
+        }
+        catch (NoSuchObjectException | TableOfflineException e) {
+            throw new TableNotFoundException(schemaTableName);
+        }
 
-        HivePartition partition = Iterables.getFirst(partitions, null);
-        if (partition == null) {
+        TupleDomain<ColumnHandle> effectivePredicate = hiveTableLayoutHandle.getConstraint();
+
+        Optional<HiveBucketing.HiveBucket> bucket = getHiveBucket(table, effectivePredicate.extractFixedValues());
+
+        TupleDomain<HiveColumnHandle> compactEffectivePredicate = toCompactTupleDomain(effectivePredicate);
+
+        List<HiveColumnHandle> partitionColumns = getPartitionKeyColumnHandles(connectorId, table, 0);
+
+        List<String> filteredPartitionNames = HiveUtil.filterPartitionNames(partitionColumns, effectivePredicate, assumeCanonicalPartitionKeys);
+        if (filteredPartitionNames.isEmpty()) {
             return new FixedSplitSource(connectorId, ImmutableList.<ConnectorSplit>of());
         }
-        SchemaTableName tableName = partition.getTableName();
-        Optional<HiveBucketing.HiveBucket> bucket = partition.getBucket();
 
-        // sort partitions
-        partitions = Ordering.natural().onResultOf(ConnectorPartition::getPartitionId).reverse().sortedCopy(partitions);
-
-        Table table;
-        Iterable<HivePartitionMetadata> hivePartitions;
+        List<String> partitionNames = null;
         try {
-            table = metastore.getTable(tableName.getSchemaName(), tableName.getTableName());
-            hivePartitions = getPartitionMetadata(table, tableName, partitions);
+            // fetch the partition names
+            partitionNames = metastore.getPartitionNamesByParts(schemaTableName.getSchemaName(), schemaTableName.getTableName(), filteredPartitionNames);
         }
         catch (NoSuchObjectException e) {
-            throw new TableNotFoundException(tableName);
+            throw new TableNotFoundException(schemaTableName);
+        }
+
+        List<HivePartition> hivePartitions = new ArrayList<>();
+        if (table.getPartitionKeys().isEmpty()) {
+            hivePartitions.add(new HivePartition(schemaTableName, compactEffectivePredicate, bucket));
+        }
+        else {
+            for (String partitionName : partitionNames) {
+                // filter the partitions for the fields that cannot be used
+                Optional<Map<ColumnHandle, SerializableNativeValue>> values = parseValuesAndFilterPartition(partitionName, partitionColumns, effectivePredicate);
+
+                if (values.isPresent()) {
+                    hivePartitions.add(new HivePartition(schemaTableName, compactEffectivePredicate, partitionName, values.get(), bucket));
+                }
+            }
+        }
+
+        // sort partitions
+        hivePartitions = Ordering.natural().onResultOf(HivePartition::getPartitionId).reverse().sortedCopy(hivePartitions);
+
+        Iterable<HivePartitionMetadata> hivePartitionMetadatas;
+        try {
+            hivePartitionMetadatas = getPartitionMetadata(table, schemaTableName, hivePartitions);
+        }
+        catch (NoSuchObjectException e) {
+            throw new TableNotFoundException(schemaTableName);
         }
 
         HiveSplitLoader hiveSplitLoader = new BackgroundHiveSplitLoader(
                 connectorId,
                 table,
-                hivePartitions,
+                hivePartitionMetadatas,
                 bucket,
                 maxSplitSize,
-                hiveTableHandle.getSession(),
+                hiveTableLayoutHandle.getHiveTableHandle().getSession(),
                 hdfsEnvironment,
                 namenodeStats,
                 directoryLister,

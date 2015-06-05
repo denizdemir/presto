@@ -43,6 +43,11 @@ public interface ConnectorMetadata
         throw new UnsupportedOperationException("not yet implemented");
     }
 
+    default Optional<Slice> computeDigest(ConnectorTableHandle tableHandle, ConnectorTableLayoutHandle tableLayoutHandle)
+    {
+        return Optional.empty();
+    }
+
     default ConnectorTableLayout getTableLayout(ConnectorTableLayoutHandle handle)
     {
         throw new UnsupportedOperationException("not yet implemented");

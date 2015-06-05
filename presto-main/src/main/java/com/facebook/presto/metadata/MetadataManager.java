@@ -290,6 +290,17 @@ public class MetadataManager
     }
 
     @Override
+    public Optional<Slice> computeDigest(TableHandle tableHandle, TableLayoutHandle tableLayoutHandle)
+    {
+        checkNotNull(tableHandle, "tableHandle is null");
+        checkNotNull(tableLayoutHandle, "tableLayoutHandle is null");
+
+        ConnectorMetadata connectorMetadata = getConnectorMetadata(tableHandle.getConnectorId());
+
+        return connectorMetadata.computeDigest(tableHandle.getConnectorHandle(), tableLayoutHandle.getConnectorHandle());
+    }
+
+    @Override
     public TableMetadata getTableMetadata(TableHandle tableHandle)
     {
         ConnectorTableMetadata tableMetadata = lookupConnectorFor(tableHandle).getTableMetadata(tableHandle.getConnectorHandle());

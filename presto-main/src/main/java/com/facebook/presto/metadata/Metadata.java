@@ -66,6 +66,9 @@ public interface Metadata
     @NotNull
     TableLayout getLayout(TableLayoutHandle handle);
 
+    @NotNull
+    Optional<Slice> computeDigest(TableHandle tableHandle, TableLayoutHandle tableLayoutHandle);
+
     /**
      * Return the metadata for the specified table handle.
      *
